@@ -37,7 +37,6 @@ from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_l
 
 from src.data_generation.prompts import (
     CRESCENDO_VARIANT_1,
-    BASE_TARGET_PROMPT,
     REFUSAL_WITH_OBJECTIVE,
     TRUE_FALSE_SYSTEM_PROMPT,
 )
@@ -181,7 +180,7 @@ class CrescendoRunner:
 
     async def _get_target_response(self, state: CrescendoState) -> str:
         """Send current target_history to the target model and return its reply."""
-        messages = [{"role": "system", "content": BASE_TARGET_PROMPT}] + state.target_history
+        messages = state.target_history
 
         async with self._target_sem:
             response = await self._target.chat.completions.create(
