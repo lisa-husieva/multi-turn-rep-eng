@@ -1,4 +1,5 @@
 # Install this on the GPU machine (Linux + CUDA)
-# Do NOT install requirements.txt first — vllm manages torch itself.
-# Usage: pip install -r requirements-gpu.txt && pip install -r requirements.txt --no-deps torch
+# Usage:
+#   pip install -r requirements-gpu.txt   # installs vllm + its pinned torch
+#   pip install -r requirements.txt       # pip keeps existing torch, installs everything else
 vllm==0.8.3
