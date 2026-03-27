@@ -22,7 +22,7 @@ echo "Target API will be available at: http://localhost:$PORT/v1"
 echo "Press Ctrl+C to stop."
 echo ""
 
-python -m vllm.entrypoints.openai.api_server \
+python3 -m vllm.entrypoints.openai.api_server \
     --model "$MODEL_ID" \
     --port "$PORT" \
     --gpu-memory-utilization "$GPU_MEM" \
