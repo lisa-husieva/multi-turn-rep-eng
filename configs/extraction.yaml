@@ -1,0 +1,24 @@
+extraction:
+  designs: [A, B]
+
+  # Design A: r_n at varying k
+  design_a:
+    k_values: all  # 1 to k_max for each conversation
+
+  # Design B: r_t at full context
+  design_b:
+    turns: all  # t=1 to n for each conversation
+
+  # Representation aggregation
+  aggregation:
+    mean_pool: true     # one vector per (turn/k, layer) — for probe training and trajectory analysis
+    token_level: true   # one vector per token — for replication of Bullwinkel et al.
+
+  # Layer settings
+  layers:
+    mean_pool: all      # extract mean-pooled vectors at every layer
+    token_level: [20, 31]  # store per-token hidden states at these layers only (storage efficiency)
+
+output:
+  representations_file: data/representations/representations.jsonl
+  arrays_dir: data/representations/arrays/

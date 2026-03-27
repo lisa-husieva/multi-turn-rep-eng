@@ -37,11 +37,11 @@ This study addresses the topic confound present in prior probing work — specif
 
 Two extraction designs implemented in the same forward pass, so conversations are only processed once:
 
-**Design A — r_n at varying k:** For each conversation, extract hidden states at final response tokens r_n with k=1 to k=k_max turns of context. Mean-pool over response tokens at each k. Replicates the Bullwinkel et al. design, enabling direct comparison.
+**Design A — r_n at varying k:** For each conversation, extract hidden states at final response tokens r_n with k=1 to k=k_max turns of context. Replicates the Bullwinkel et al. design, enabling direct comparison.
 
-**Design B — r_t at full context:** For each conversation, extract hidden states from each turn's own response r_t at full context up to that turn. r_1 with context p_1; r_2 with context p_1, r_1, p_2; and so on. Mean-pool over response tokens at each turn. This is the more natural operationalization of trajectory — tracking how the model represents its own responses as the conversation evolves rather than how it represents the same final response under varying context.
+**Design B — r_t at full context:** For each conversation, extract hidden states from each turn's own response r_t at full context up to that turn. r_1 with context p_1; r_2 with context p_1, r_1, p_2; and so on. This is the more natural operationalization of trajectory — tracking how the model represents its own responses as the conversation evolves rather than how it represents the same final response under varying context.
 
-**Layers:** Mean-pooled vectors extracted at all layers for both designs. Per-token hidden states stored at a subset of layers only for storage efficiency.
+**Representation aggregation:** For both designs, we will evaluate two aggregation strategies: (1) mean-pooling over response tokens to produce one vector per (turn, layer), suitable for response-level probe training and trajectory analysis; and (2) token-level representations, treating each token as a separate data point as in Bullwinkel et al., enabling direct methodological comparison and finer-grained analysis of which tokens drive the harmful/benign signal. Mean-pooled vectors are extracted at all layers; per-token hidden states stored at a subset of layers only for storage efficiency.
 
 **Output:** One `representations.jsonl` record per (conversation, model, extraction design, k or t, layer), with fields for attack framework, verdict, harm category, objective pair ID, and paths to stored numpy arrays.
 
