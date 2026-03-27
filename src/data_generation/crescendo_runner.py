@@ -308,14 +308,24 @@ class CrescendoRunner:
             is_refusal, is_success, rationale = await self._evaluate(state, target_response)
             state.is_refusal = is_refusal
 
-            if not is_refusal:
+            # Always add target response to attacker context to maintain alternating roles.
+            # Without this, a refusal leaves a dangling user message and the next turn
+            # produces consecutive user messages, which the OpenAI API rejects.
+            state.attacker_context.append(
+                AttackerMessage(role="assistant", content=target_response)
+            )
+
+            if is_refusal:
+                # Roll back target_history so the target doesn't see the failed exchange
+                # on the next turn — keeping refusals in target context primes the model
+                # to keep refusing.  The attacker is still informed via the next turn's
+                # user prompt ("The target refused … please try a different approach").
+                state.target_history.pop()   # remove assistant (refusal response)
+                state.target_history.pop()   # remove user (refused question)
+            else:
                 state.executed_turns += 1
                 state.success_score = 1.0 if is_success else 0.0
                 state.success_rationale = rationale
-                # Add target response to attacker context so it can reference it next turn
-                state.attacker_context.append(
-                    AttackerMessage(role="assistant", content=target_response)
-                )
 
             if is_success:
                 verdict = "jailbroken"
