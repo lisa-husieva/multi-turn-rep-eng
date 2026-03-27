@@ -9,6 +9,15 @@
 
 set -euo pipefail
 
+# Load .env from repo root so CUDA_VISIBLE_DEVICES and other settings are picked up
+ENV_FILE="$(dirname "$0")/../.env"
+if [ -f "$ENV_FILE" ]; then
+    set -a && source "$ENV_FILE" && set +a
+else
+    echo "Warning: .env not found at $ENV_FILE — using environment defaults"
+fi
+
+# Fallback if not set in .env
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-4}"
 
 MODEL_ID="${1:-meta-llama/Llama-3.1-8B-Instruct}"
