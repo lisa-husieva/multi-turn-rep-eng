@@ -27,6 +27,8 @@ import logging
 import os
 from pathlib import Path
 
+from tqdm.auto import tqdm
+
 from src.data_generation.crescendo_runner import CrescendoRunner
 
 logger = logging.getLogger(__name__)
@@ -52,6 +54,7 @@ async def generate_all(
     attacker_model: str = "gpt-4o-mini",
     judge_model: str = "gpt-4o",
     resume: bool = True,
+    desc: str = "Conversations",
 ) -> list[dict]:
     """
     Run attacks for all objectives and save one JSON file per conversation.
@@ -136,5 +139,12 @@ async def generate_all(
         for attempt in range(1, n_attempts + 1)
     ]
 
-    results = await asyncio.gather(*tasks)
+    results = []
+    pbar = tqdm(total=len(tasks), desc=desc, unit="conv")
+    for fut in asyncio.as_completed(tasks):
+        result = await fut
+        results.append(result)
+        pbar.update(1)
+    pbar.close()
+
     return [r for r in results if r is not None]
