@@ -53,7 +53,7 @@ def load_jbb_objectives(max_objectives: int | None = None) -> list[dict]:
     Returns list of dicts: [{"objective": str, "pair_id": int, "category": str}, ...]
     """
     logger.info("Loading JBB-Behaviors dataset...")
-    ds = load_dataset("JailbreakBench/JBB-Behaviors", split="harmful")
+    ds = load_dataset("JailbreakBench/JBB-Behaviors", name="behaviors", split="harmful")
 
     objectives = []
     for i, row in enumerate(ds):
@@ -61,9 +61,9 @@ def load_jbb_objectives(max_objectives: int | None = None) -> list[dict]:
             break
         objectives.append({
             "objective": row["Goal"],
-            "pair_id": i,
+            "pair_id": row["Index"],
             "category": row.get("Category", "unknown"),
-            "behavior_id": row.get("BehaviorID", str(i)),
+            "behavior_id": row.get("Behavior", str(i)),
         })
 
     logger.info(f"Loaded {len(objectives)} objectives.")
