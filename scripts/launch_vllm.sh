@@ -9,6 +9,8 @@
 
 set -euo pipefail
 
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-4}"
+
 MODEL_ID="${1:-meta-llama/Llama-3.1-8B-Instruct}"
 PORT="${2:-8000}"
 GPU_MEM="${3:-0.9}"
@@ -17,6 +19,7 @@ echo "Launching vLLM server..."
 echo "  Model: $MODEL_ID"
 echo "  Port:  $PORT"
 echo "  GPU memory utilization: $GPU_MEM"
+echo "  CUDA device: $CUDA_VISIBLE_DEVICES"
 echo ""
 echo "Target API will be available at: http://localhost:$PORT/v1"
 echo "Press Ctrl+C to stop."
