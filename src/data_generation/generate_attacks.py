@@ -1,8 +1,8 @@
 """
 Generate harmful multi-turn attack conversations.
 
-Currently implements Crescendo. ActorAttack and X-Teaming runners will follow
-the same interface once implemented.
+Orchestrates multi-turn attack generation across all three frameworks:
+Crescendo, ActorAttack, and X-Teaming. All runners share the same interface.
 
 Each saved conversation file is a JSON object matching the schema:
 {
@@ -29,14 +29,16 @@ from pathlib import Path
 
 from tqdm.auto import tqdm
 
+from src.data_generation.actorattack_runner import ActorAttackRunner
 from src.data_generation.crescendo_runner import CrescendoRunner
+from src.data_generation.xteaming_runner import XTeamingRunner
 
 logger = logging.getLogger(__name__)
 
 FRAMEWORK_RUNNERS = {
-    "crescendo": CrescendoRunner,
-    # "actorattack": ActorAttackRunner,   # TODO
-    # "xteaming": XTeamingRunner,         # TODO
+    "crescendo":   CrescendoRunner,
+    "actorattack": ActorAttackRunner,
+    "xteaming":    XTeamingRunner,
 }
 
 
@@ -91,6 +93,7 @@ async def generate_all(
         target_model_id=target_model_id,
         openai_api_key=openai_api_key or os.environ.get("OPENAI_API_KEY"),
         vllm_base_url=vllm_base_url,
+        vllm_api_key=os.environ.get("VLLM_API_KEY", "token-abc123"),
         attacker_semaphore=asyncio.Semaphore(concurrency * 2),
         judge_semaphore=asyncio.Semaphore(concurrency * 2),
         target_semaphore=asyncio.Semaphore(concurrency),
