@@ -289,7 +289,7 @@ class ActorAttackRunner:
                 model=self.target_model_id,
                 messages=history,
                 temperature=0.0,
-                max_tokens=512,
+                max_tokens=2048,
             )
         return resp.choices[0].message.content or ""
 

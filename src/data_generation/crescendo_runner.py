@@ -187,7 +187,7 @@ class CrescendoRunner:
                 model=self.target_model_id,
                 messages=messages,
                 temperature=0.0,
-                max_tokens=512,
+                max_tokens=2048,
             )
 
         return response.choices[0].message.content or ""

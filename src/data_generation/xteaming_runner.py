@@ -57,6 +57,24 @@ _THINK_RE = re.compile(r"<think(?:ing)?>(.*?)</think(?:ing)?>", re.DOTALL | re.I
 _CONV_OPEN = "<conversation>"
 _CONV_CLOSE = "</conversation>"
 
+# Leading phrases that indicate the attacker LLM refused to generate a turn.
+_ATTACKER_REFUSAL_PREFIXES = (
+    "i'm sorry",
+    "i am sorry",
+    "i can't",
+    "i cannot",
+    "i'm not able",
+    "i am not able",
+    "i won't",
+    "i will not",
+    "i'm unable",
+    "i am unable",
+)
+
+
+def _is_attacker_refusal(text: str) -> bool:
+    return text.lower().strip().startswith(_ATTACKER_REFUSAL_PREFIXES)
+
 
 def _extract_conversation(text: str) -> str:
     # Strip all chain-of-thought blocks first.
@@ -415,7 +433,10 @@ class XTeamingRunner:
                 temperature=1.0,
                 max_tokens=1024,
             )
-        return _extract_conversation(raw)
+        msg = _extract_conversation(raw)
+        if _is_attacker_refusal(msg):
+            raise ValueError(f"Attacker refused to generate turn {phase}: {msg[:120]}")
+        return msg
 
     async def _revise_plan(
         self,
@@ -461,6 +482,6 @@ class XTeamingRunner:
                 model=self.target_model_id,
                 messages=history,
                 temperature=0.0,
-                max_tokens=512,
+                max_tokens=2048,
             )
         return resp.choices[0].message.content or ""
