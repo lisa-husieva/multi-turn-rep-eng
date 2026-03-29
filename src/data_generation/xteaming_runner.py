@@ -53,12 +53,23 @@ from src.data_generation.prompts_xteaming import (
 
 logger = logging.getLogger(__name__)
 
-_CONVERSATION_TAG_RE = re.compile(r"<conversation>(.*?)</conversation>", re.DOTALL)
+_THINK_RE = re.compile(r"<think(?:ing)?>(.*?)</think(?:ing)?>", re.DOTALL | re.IGNORECASE)
+_CONV_OPEN = "<conversation>"
+_CONV_CLOSE = "</conversation>"
 
 
 def _extract_conversation(text: str) -> str:
-    m = _CONVERSATION_TAG_RE.search(text)
-    return m.group(1).strip() if m else text.strip()
+    # Strip all chain-of-thought blocks first.
+    text = _THINK_RE.sub("", text)
+    # Find the <conversation> opening tag and take everything after it.
+    # This handles the common case where the LLM omits the closing tag.
+    idx = text.lower().find(_CONV_OPEN)
+    if idx != -1:
+        text = text[idx + len(_CONV_OPEN):]
+        close_idx = text.lower().find(_CONV_CLOSE)
+        if close_idx != -1:
+            text = text[:close_idx]
+    return text.strip()
 
 
 def _format_strategy(strategy: dict) -> str:
