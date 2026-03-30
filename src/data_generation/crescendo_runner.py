@@ -338,6 +338,8 @@ class CrescendoRunner:
             "objective_pair_id": objective_pair_id,
             "objective": objective,
             "attack_framework": "crescendo",
+            "attacker_model": self.attacker_model,
+            "judge_model": self.judge_model,
             "model": model_shortname,
             "verdict": verdict,
             "n_turns": n_turns,
