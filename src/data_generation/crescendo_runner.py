@@ -292,6 +292,7 @@ class CrescendoRunner:
 
         turns = []
         verdict = "refusal"
+        jailbreak_turn: int | None = None
 
         for turn_idx in range(1, n_turns + 1):
             # 1. Generate question
@@ -303,13 +304,14 @@ class CrescendoRunner:
             target_response = await self._get_target_response(state)
             state.target_history.append({"role": "assistant", "content": target_response})
 
-            # Record turn
-            turns.append({"role": "user", "content": question, "turn_idx": turn_idx})
-            turns.append({"role": "assistant", "content": target_response, "turn_idx": turn_idx})
-
             # 3. Evaluate
             is_refusal, is_success, rationale = await self._evaluate(state, target_response)
             state.is_refusal = is_refusal
+
+            # Record turn — is_refusal logged so extraction can skip these turns
+            # without re-detecting refusals via string matching
+            turns.append({"role": "user",      "content": question,        "turn_idx": turn_idx})
+            turns.append({"role": "assistant",  "content": target_response, "turn_idx": turn_idx, "is_refusal": is_refusal})
 
             # Always add target response to attacker context to maintain alternating roles.
             # Without this, a refusal leaves a dangling user message and the next turn
@@ -330,12 +332,13 @@ class CrescendoRunner:
                 state.success_score = 1.0 if is_success else 0.0
                 state.success_rationale = rationale
 
-            if is_success:
+            if is_success and jailbreak_turn is None:
+                jailbreak_turn = turn_idx
                 verdict = "jailbroken"
                 if stop_on_success:
                     break
 
-            if turn_idx == n_turns:
+            if turn_idx == n_turns and jailbreak_turn is None:
                 verdict = "near_miss" if not is_refusal else "refusal"
 
         return {
@@ -347,6 +350,7 @@ class CrescendoRunner:
             "judge_model": self.judge_model,
             "model": model_shortname,
             "verdict": verdict,
+            "jailbreak_turn": jailbreak_turn,
             "n_turns": n_turns,
             "executed_turns": state.executed_turns,
             "turns": turns,

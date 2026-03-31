@@ -122,7 +122,7 @@ async def generate_all(
                     model_shortname=model_shortname,
                     n_turns=n_turns,
                 )
-                if framework == "crescendo":
+                if framework in ("crescendo", "xteaming"):
                     kwargs["stop_on_success"] = stop_on_success
                 conv = await runner.run_attack(**kwargs)
                 conv["attempt"] = attempt
