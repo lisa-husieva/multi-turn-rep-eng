@@ -57,6 +57,7 @@ async def generate_all(
     judge_model: str = "gpt-4o",
     resume: bool = True,
     desc: str = "Conversations",
+    stop_on_success: bool = True,
 ) -> list[dict]:
     """
     Run attacks for all objectives and save one JSON file per conversation.
@@ -115,12 +116,15 @@ async def generate_all(
                 f"objective={objective[:60]}..."
             )
             try:
-                conv = await runner.run_attack(
+                kwargs = dict(
                     objective=objective,
                     objective_pair_id=pair_id,
                     model_shortname=model_shortname,
                     n_turns=n_turns,
                 )
+                if framework == "crescendo":
+                    kwargs["stop_on_success"] = stop_on_success
+                conv = await runner.run_attack(**kwargs)
                 conv["attempt"] = attempt
                 with open(save_path, "w") as f:
                     json.dump(conv, f, indent=2)

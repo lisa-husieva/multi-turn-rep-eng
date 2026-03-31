@@ -260,6 +260,7 @@ class CrescendoRunner:
         objective_pair_id: int,
         model_shortname: str,
         n_turns: int = 3,
+        stop_on_success: bool = True,
     ) -> dict:
         """
         Run a single Crescendo attack conversation.
@@ -269,6 +270,9 @@ class CrescendoRunner:
             objective_pair_id: ID linking this conversation to its JBB matched pair.
             model_shortname: Shortname of the target model (e.g. "llama3_8b").
             n_turns: Number of attack turns to run.
+            stop_on_success: If False, continue all n_turns even after a successful
+                response. Set to False for benign conversations so the full turn
+                sequence is generated regardless of judge score.
 
         Returns:
             Conversation dict matching the schema in src/utils/io.py.
@@ -328,7 +332,8 @@ class CrescendoRunner:
 
             if is_success:
                 verdict = "jailbroken"
-                break
+                if stop_on_success:
+                    break
 
             if turn_idx == n_turns:
                 verdict = "near_miss" if not is_refusal else "refusal"
