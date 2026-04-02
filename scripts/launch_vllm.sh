@@ -9,7 +9,10 @@
 
 set -euo pipefail
 
-# Load .env from repo root so CUDA_VISIBLE_DEVICES and other settings are picked up
+# Save CUDA_VISIBLE_DEVICES if already set by caller (e.g. CUDA_VISIBLE_DEVICES=5 bash launch_vllm.sh)
+_CUDA_CALLER="${CUDA_VISIBLE_DEVICES:-}"
+
+# Load .env for API keys and other settings — but NOT CUDA_VISIBLE_DEVICES
 ENV_FILE="$(dirname "$0")/../.env"
 if [ -f "$ENV_FILE" ]; then
     set -a && source "$ENV_FILE" && set +a
@@ -17,8 +20,12 @@ else
     echo "Warning: .env not found at $ENV_FILE — using environment defaults"
 fi
 
-# Fallback if not set in .env
-export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-4}"
+# Restore caller's CUDA_VISIBLE_DEVICES if it was set; otherwise fall back to .env value or default
+if [ -n "$_CUDA_CALLER" ]; then
+    export CUDA_VISIBLE_DEVICES="$_CUDA_CALLER"
+else
+    export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-4}"
+fi
 
 MODEL_ID="${1:-meta-llama/Llama-3.1-8B-Instruct}"
 PORT="${2:-8000}"
