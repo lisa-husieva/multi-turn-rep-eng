@@ -41,6 +41,7 @@ from src.data_generation._runner_utils import (
     score_response,
     score_to_verdict,
 )
+from src.data_generation.prompts import BASE_TARGET_PROMPT
 from src.data_generation.prompts_actorattack import (
     ACTOR_PROMPT,
     EXTRACT_PROMPT,
@@ -195,6 +196,7 @@ class ActorAttackRunner:
             "attacker_model":       self.attacker_model,
             "judge_model":          self.judge_model,
             # ── Target call parameters ───────────────────────────────────────
+            "target_system_prompt":  BASE_TARGET_PROMPT,
             "target_temperature":   _TARGET_TEMPERATURE,
             "target_max_tokens":    _TARGET_MAX_TOKENS,
             # ── Outcome ──────────────────────────────────────────────────────
@@ -414,7 +416,7 @@ class ActorAttackRunner:
         if not queries:
             return [], 0, 0, "", {}
 
-        target_history: list[dict] = []
+        target_history: list[dict] = [{"role": "system", "content": BASE_TARGET_PROMPT}]
         turns_out: list[dict] = []
         executed: int = 0
 
