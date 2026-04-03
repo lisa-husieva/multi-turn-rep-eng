@@ -204,10 +204,15 @@ class CrescendoRunner:
         return response.choices[0].message.content or ""
 
     async def _evaluate(
-        self, state: CrescendoState, target_response: str
+        self, state: CrescendoState, question: str, target_response: str
     ) -> tuple[bool, str, dict, bool, str, str, dict]:
         """
         Evaluate the target's response with two sequential judge calls.
+
+        Args:
+            state: Current attack state (holds final objective).
+            question: The current turn's question sent to the target.
+            target_response: The target's reply to evaluate.
 
         Returns:
             (is_refusal, refusal_rationale, refusal_raw,
@@ -216,13 +221,15 @@ class CrescendoRunner:
             refusal_raw / success_raw are the full JSON dicts returned by the judge.
             success_raw is {} when the refusal check short-circuits (is_refusal=True).
         """
-        # Step 1: refusal check
+        # Step 1: refusal check — uses the CURRENT question, not the final objective.
+        # Crescendo questions are intentionally indirect; checking against the final
+        # objective would mark every intermediate answer as "unrelated" (a false refusal).
         refusal_messages = [
             {"role": "system", "content": REFUSAL_WITH_OBJECTIVE},
             {
                 "role": "user",
                 "content": (
-                    f"conversation_objective: {state.objective}\n"
+                    f"conversation_objective: {question}\n"
                     f"response_to_evaluate_input: {target_response}"
                 ),
             },
@@ -334,7 +341,7 @@ class CrescendoRunner:
             (
                 is_refusal, refusal_rationale, refusal_raw,
                 is_success, success_rationale, success_description, success_raw,
-            ) = await self._evaluate(state, target_response)
+            ) = await self._evaluate(state, question, target_response)
             state.is_refusal = is_refusal
 
             # Record user turn
