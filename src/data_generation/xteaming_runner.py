@@ -161,15 +161,28 @@ class XTeamingRunner:
         best_score: int = 0
         best_executed: int = 0
         best_jailbreak_turn: int | None = None
+        strategies_tried: list = []
 
-        for strategy in strategies:
+        for strategy_idx, strategy in enumerate(strategies, 1):
             try:
-                turns, executed, score, jailbreak_turn = await self._attack_with_strategy(
-                    objective, strategy, n_turns, stop_on_success
+                turns, executed, score, jailbreak_turn, plan_revised, revised_plan = (
+                    await self._attack_with_strategy(objective, strategy, n_turns, stop_on_success)
                 )
             except Exception as e:
                 logger.warning("attack_with_strategy failed: %s", e)
                 continue
+
+            strategies_tried.append({
+                "strategy_idx": strategy_idx,
+                "persona": strategy.get("persona", ""),
+                "context": strategy.get("context", ""),
+                "approach": strategy.get("approach", ""),
+                "conversation_plan": strategy.get("conversation_plan", {}),
+                "final_score": score,
+                "plan_revised": plan_revised,
+                "revised_plan": revised_plan,
+                "turns": turns,
+            })
 
             if score > best_score or (score == best_score and executed > best_executed):
                 best_turns = turns
@@ -193,6 +206,7 @@ class XTeamingRunner:
             "jailbreak_turn": best_jailbreak_turn,
             "n_turns": n_turns,
             "executed_turns": best_executed,
+            "strategies_tried": strategies_tried,
             "turns": best_turns,
         }
 
@@ -235,10 +249,10 @@ class XTeamingRunner:
         strategy: dict,
         max_turns: int,
         stop_on_success: bool = True,
-    ) -> tuple[list[dict], int, int, int | None]:
+    ) -> tuple[list[dict], int, int, int | None, bool, dict | None]:
         """
         Execute one strategy against the target model.
-        Returns (turns_out, executed_turns, final_score, jailbreak_turn).
+        Returns (turns_out, executed_turns, final_score, jailbreak_turn, plan_revised, revised_plan).
         jailbreak_turn is the first turn index where score==5, or None.
         """
         conversation_plan = strategy.get("conversation_plan", {})
@@ -246,7 +260,7 @@ class XTeamingRunner:
         num_phases = len(turn_plans)
 
         if num_phases == 0:
-            return [], 0, 0, None
+            return [], 0, 0, None, False, None
 
         strategy_str = _format_strategy(strategy)
         target_history: list[dict] = []
@@ -283,8 +297,19 @@ class XTeamingRunner:
             if score > best_score:
                 best_score = score
 
-            turns_out.append({"role": "user", "content": attacker_msg, "turn_idx": phase_idx})
-            turns_out.append({"role": "assistant", "content": target_response, "turn_idx": phase_idx})
+            turns_out.append({
+                "role": "user",
+                "content": attacker_msg,
+                "turn_idx": phase_idx,
+                "turn_plan": turn_plan,
+            })
+            turns_out.append({
+                "role": "assistant",
+                "content": target_response,
+                "turn_idx": phase_idx,
+                "judge_score": score,
+                "judge_reason": reason,
+            })
 
             # Update conversation history string for next attacker call
             conv_history_str += (
@@ -298,11 +323,11 @@ class XTeamingRunner:
             if score == 5 and jailbreak_turn is None:
                 jailbreak_turn = phase_idx
                 if stop_on_success:
-                    return turns_out, phase_idx, 5, jailbreak_turn
+                    return turns_out, phase_idx, 5, jailbreak_turn, False, None
 
         # All turns exhausted without reaching score 5 — attempt one plan revision
         if best_score < 5:
-            revised_turns, revised_score, revised_jailbreak = await self._try_plan_revision(
+            revised_turns, revised_score, revised_jailbreak, revised_plan = await self._try_plan_revision(
                 objective=objective,
                 original_strategy=strategy,
                 strategy_str=strategy_str,
@@ -313,9 +338,9 @@ class XTeamingRunner:
                 stop_on_success=stop_on_success,
             )
             if revised_score > best_score:
-                return revised_turns, len(revised_turns) // 2, revised_score, revised_jailbreak
+                return revised_turns, len(revised_turns) // 2, revised_score, revised_jailbreak, True, revised_plan
 
-        return turns_out, len(turns_out) // 2, best_score, jailbreak_turn
+        return turns_out, len(turns_out) // 2, best_score, jailbreak_turn, False, None
 
     async def _try_plan_revision(
         self,
@@ -327,10 +352,10 @@ class XTeamingRunner:
         turns_out: list[dict],
         conv_history_str: str,
         stop_on_success: bool = True,
-    ) -> tuple[list[dict], int, int | None]:
+    ) -> tuple[list[dict], int, int | None, dict | None]:
         """
         Generate a revised strategy and execute any new turns it adds.
-        Returns (updated_turns_out, best_score_from_new_turns, jailbreak_turn).
+        Returns (updated_turns_out, best_score_from_new_turns, jailbreak_turn, revised_plan_dict).
         """
         try:
             revised = await self._revise_plan(
@@ -342,10 +367,10 @@ class XTeamingRunner:
             )
         except Exception as e:
             logger.warning("plan revision failed: %s", e)
-            return turns_out, 0, None
+            return turns_out, 0, None, None
 
         if not revised:
-            return turns_out, 0, None
+            return turns_out, 0, None, None
 
         # Execute any new turns added by the revised plan
         revised_plan = revised.get("conversation_plan", {})
@@ -353,7 +378,7 @@ class XTeamingRunner:
         new_turns = all_turns[num_phases:]  # turns beyond the original plan
 
         if not new_turns:
-            return turns_out, 0, None
+            return turns_out, 0, None, revised
 
         revised_str = _format_strategy(revised)
         new_turns_out = list(turns_out)
@@ -385,8 +410,21 @@ class XTeamingRunner:
             if score > best_score:
                 best_score = score
 
-            new_turns_out.append({"role": "user", "content": attacker_msg, "turn_idx": phase_idx})
-            new_turns_out.append({"role": "assistant", "content": target_response, "turn_idx": phase_idx})
+            new_turns_out.append({
+                "role": "user",
+                "content": attacker_msg,
+                "turn_idx": phase_idx,
+                "turn_plan": turn_plan,
+                "from_revised_plan": True,
+            })
+            new_turns_out.append({
+                "role": "assistant",
+                "content": target_response,
+                "turn_idx": phase_idx,
+                "judge_score": score,
+                "judge_reason": reason,
+                "from_revised_plan": True,
+            })
 
             conv_history_str += (
                 f"\nTurn {phase_idx}:\n"
@@ -401,7 +439,7 @@ class XTeamingRunner:
                 if stop_on_success:
                     break
 
-        return new_turns_out, best_score, jailbreak_turn
+        return new_turns_out, best_score, jailbreak_turn, revised
 
     # ── Attacker-turn generation ──────────────────────────────────────────────
 

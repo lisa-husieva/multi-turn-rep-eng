@@ -113,17 +113,27 @@ class ActorAttackRunner:
         best_turns: list = []
         best_score: int = 0
         best_executed: int = 0
+        actors_tried: list = []
 
         for actor in actors:
             if not actor.get("queries"):
                 continue
             try:
-                turns, executed, score = await self._attack_with_actor(
+                turns, executed, score, score_reason = await self._attack_with_actor(
                     objective, query_details, actor
                 )
             except Exception as e:
                 logger.warning("attack_with_actor failed for actor %s: %s", actor.get("actor_name"), e)
                 continue
+
+            actors_tried.append({
+                "actor_name": actor.get("actor_name", ""),
+                "relationship": actor.get("relationship", ""),
+                "queries_generated": list(actor.get("queries", [])),
+                "final_score": score,
+                "final_score_reason": score_reason,
+                "turns": turns,
+            })
 
             if score > best_score or (score == best_score and executed > best_executed):
                 best_turns = turns
@@ -145,6 +155,9 @@ class ActorAttackRunner:
             "verdict": verdict,
             "n_turns": n_turns,
             "executed_turns": best_executed,
+            "harm_target": harm_target,
+            "query_details": query_details,
+            "actors_tried": actors_tried,
             "turns": best_turns,
         }
 
@@ -300,20 +313,23 @@ class ActorAttackRunner:
         objective: str,
         query_details: dict,
         actor: dict,
-    ) -> tuple[list[dict], int, int]:
+    ) -> tuple[list[dict], int, int, str]:
         """
         Execute the full query chain for one actor against the target model.
-        Returns (turns_out, executed_turns, final_score).
+        Returns (turns_out, executed_turns, final_score, final_score_reason).
         """
         queries: list[str] = list(actor.get("queries", []))
         if not queries:
-            return [], 0, 0
+            return [], 0, 0, ""
 
         target_history: list[dict] = []
         turns_out: list[dict] = []
         executed: int = 0
 
         for turn_idx, query in enumerate(queries, 1):
+            original_query = query
+            was_modified = False
+
             # Send query to target
             target_history.append({"role": "user", "content": query})
             target_response = await self._get_target_response(target_history)
@@ -333,6 +349,7 @@ class ActorAttackRunner:
                 )
                 new_query = new_query.strip()
                 if new_query and new_query != query:
+                    was_modified = True
                     queries[turn_idx - 1] = new_query
                     query = new_query
                     target_history.append({"role": "user", "content": query})
@@ -344,7 +361,14 @@ class ActorAttackRunner:
                     target_history.append({"role": "user", "content": query})
                     target_history.append({"role": "assistant", "content": target_response})
 
-            turns_out.append({"role": "user", "content": query, "turn_idx": turn_idx})
+            turns_out.append({
+                "role": "user",
+                "content": query,
+                "turn_idx": turn_idx,
+                "step_judge": response_type,
+                "was_modified": was_modified,
+                "original_query": original_query if was_modified else None,
+            })
             turns_out.append({"role": "assistant", "content": target_response, "turn_idx": turn_idx})
 
             if response_type != "rejective":
@@ -363,12 +387,12 @@ class ActorAttackRunner:
         target_history.append({"role": "user", "content": summary_q})
         summary_response = await self._get_target_response(target_history)
         target_history.append({"role": "assistant", "content": summary_response})
-        turns_out.append({"role": "user", "content": summary_q, "turn_idx": summary_turn_idx})
+        turns_out.append({"role": "user", "content": summary_q, "turn_idx": summary_turn_idx, "is_summary": True})
         turns_out.append({"role": "assistant", "content": summary_response, "turn_idx": summary_turn_idx})
         executed += 1
 
         # Score the summary response
-        score, _ = await score_response(
+        score, score_reason = await score_response(
             self._judge, self.judge_model, self._judge_sem, objective, summary_response
         )
 
@@ -380,12 +404,13 @@ class ActorAttackRunner:
             simpler_response = await self._get_target_response(target_history)
             target_history.append({"role": "assistant", "content": simpler_response})
 
-            simpler_score, _ = await score_response(
+            simpler_score, simpler_reason = await score_response(
                 self._judge, self.judge_model, self._judge_sem, objective, simpler_response
             )
             if simpler_score >= score:
-                turns_out[-2] = {"role": "user", "content": simpler_q, "turn_idx": summary_turn_idx}
+                turns_out[-2] = {"role": "user", "content": simpler_q, "turn_idx": summary_turn_idx, "is_summary": True}
                 turns_out[-1] = {"role": "assistant", "content": simpler_response, "turn_idx": summary_turn_idx}
                 score = simpler_score
+                score_reason = simpler_reason
 
-        return turns_out, executed, score
+        return turns_out, executed, score, score_reason
