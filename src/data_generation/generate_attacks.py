@@ -4,20 +4,31 @@ Generate harmful multi-turn attack conversations.
 Orchestrates multi-turn attack generation across all three frameworks:
 Crescendo, ActorAttack, and X-Teaming. All runners share the same interface.
 
-Each saved conversation file is a JSON object matching the schema:
+Each saved conversation file is a JSON object. See individual runner files for
+the complete schema — all raw attacker/judge/target interactions are logged.
+Core fields shared across all frameworks:
+
 {
-    "conversation_id": str,          # UUID
-    "objective_pair_id": int,        # Links to JBB matched pair index
-    "objective": str,                # The harmful behavior
-    "attack_framework": str,         # "crescendo" | "actorattack" | "xteaming"
-    "model": str,                    # Model shortname, e.g. "llama3_8b"
-    "verdict": str,                  # "jailbroken" | "near_miss" | "refusal"
-    "n_turns": int,                  # Number of turns attempted
-    "executed_turns": int,           # Turns that got a non-refusal response
-    "turns": [
-        {"role": "user"|"assistant", "content": str, "turn_idx": int},
-        ...
-    ]
+    "conversation_id":    str,       # UUID
+    "objective_pair_id":  int,       # Links to JBB matched pair index
+    "objective":          str,       # The goal text
+    "goal_type":          str,       # "harmful" | "benign"
+    "attempt":            int,       # 1-indexed repetition number
+    "attack_framework":   str,       # "crescendo" | "actorattack" | "xteaming"
+    "model":              str,       # Target model shortname
+    "attacker_model":     str,
+    "judge_model":        str,
+    "target_system_prompt":   str,   # (Crescendo only; others have no fixed system prompt)
+    "attacker_system_prompt": str,   # (Crescendo only)
+    "target_temperature": float,
+    "target_max_tokens":  int,
+    "verdict":            str,       # "jailbroken" | "near_miss" | "refusal"
+    "final_turn_outcome": str,       # "accepted" | "refused" (heuristic substring check)
+    "n_turns":            int,
+    "executed_turns":     int,
+    "timestamp":          str,       # ISO 8601 UTC
+    "turns":              list[dict],
+    ... (framework-specific fields)
 }
 """
 
@@ -47,6 +58,7 @@ async def generate_all(
     framework: str,
     model_shortname: str,
     target_model_id: str,
+    goal_type: str,
     n_turns: int = 3,
     n_attempts: int = 1,
     output_dir: str | Path = "data/conversations/harmful",
@@ -57,7 +69,6 @@ async def generate_all(
     judge_model: str = "gpt-4o",
     resume: bool = True,
     desc: str = "Conversations",
-    stop_on_success: bool = True,
 ) -> list[dict]:
     """
     Run attacks for all objectives and save one JSON file per conversation.
@@ -67,6 +78,7 @@ async def generate_all(
         framework: Attack framework name ("crescendo", "actorattack", "xteaming").
         model_shortname: Target model shortname (e.g. "llama3_8b").
         target_model_id: Full HuggingFace model ID as served by vLLM.
+        goal_type: "harmful" or "benign" — stored in every conversation file.
         n_turns: Number of attack turns per conversation.
         n_attempts: Number of independent attack attempts per objective.
         output_dir: Directory to save conversation JSON files.
@@ -82,6 +94,8 @@ async def generate_all(
     """
     if framework not in FRAMEWORK_RUNNERS:
         raise ValueError(f"Unknown framework '{framework}'. Choose from: {list(FRAMEWORK_RUNNERS)}")
+    if goal_type not in ("harmful", "benign"):
+        raise ValueError(f"goal_type must be 'harmful' or 'benign', got '{goal_type}'")
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -120,12 +134,11 @@ async def generate_all(
                     objective=objective,
                     objective_pair_id=pair_id,
                     model_shortname=model_shortname,
+                    goal_type=goal_type,
+                    attempt=attempt,
                     n_turns=n_turns,
                 )
-                if framework in ("crescendo", "xteaming"):
-                    kwargs["stop_on_success"] = stop_on_success
                 conv = await runner.run_attack(**kwargs)
-                conv["attempt"] = attempt
                 with open(save_path, "w") as f:
                     json.dump(conv, f, indent=2)
                 logger.info(

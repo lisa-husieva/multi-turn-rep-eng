@@ -29,19 +29,26 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Optional
 
 from jinja2 import Template
 from openai import AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 
+from src.data_generation._runner_utils import check_final_turn_outcome
 from src.data_generation.prompts import (
+    BASE_TARGET_PROMPT,
     CRESCENDO_VARIANT_1,
     REFUSAL_WITH_OBJECTIVE,
     TRUE_FALSE_SYSTEM_PROMPT,
 )
 
 logger = logging.getLogger(__name__)
+
+# Target model call parameters — stored in output for reproducibility
+_TARGET_TEMPERATURE = 0.0
+_TARGET_MAX_TOKENS  = 2048
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +93,6 @@ async def _call_json(client: AsyncOpenAI, model: str, messages: list[dict], temp
         temperature=temperature,
     )
     content = response.choices[0].message.content or ""
-    # Strip markdown code fences if present
     content = re.sub(r"^```json\s*|\s*```$", "", content.strip(), flags=re.MULTILINE)
     return json.loads(content)
 
@@ -139,8 +145,16 @@ class CrescendoRunner:
     # Internal helpers
     # -----------------------------------------------------------------------
 
-    async def _generate_question(self, state: CrescendoState) -> str:
-        """Ask the attacker LLM for the next Crescendo question."""
+    async def _generate_question(self, state: CrescendoState) -> tuple[str, dict]:
+        """
+        Ask the attacker LLM for the next Crescendo question.
+
+        Returns:
+            (question, raw_attacker_response)
+            raw_attacker_response contains the full JSON from the attacker LLM,
+            including generated_question, last_response_summary, and
+            rationale_behind_jailbreak.
+        """
         current_turn = state.executed_turns + 1
 
         prompt_parts = [
@@ -174,30 +188,33 @@ class CrescendoRunner:
         messages = [{"role": m.role, "content": m.content} for m in state.attacker_context]
 
         async with self._attacker_sem:
-            data = await _call_json(self._attacker, self.attacker_model, messages, temperature=1.0)
+            raw = await _call_json(self._attacker, self.attacker_model, messages, temperature=1.0)
 
-        return data["generated_question"]
+        return raw["generated_question"], raw
 
     async def _get_target_response(self, state: CrescendoState) -> str:
         """Send current target_history to the target model and return its reply."""
-        messages = state.target_history
-
         async with self._target_sem:
             response = await self._target.chat.completions.create(
                 model=self.target_model_id,
-                messages=messages,
-                temperature=0.0,
-                max_tokens=2048,
+                messages=state.target_history,
+                temperature=_TARGET_TEMPERATURE,
+                max_tokens=_TARGET_MAX_TOKENS,
             )
-
         return response.choices[0].message.content or ""
 
-    async def _evaluate(self, state: CrescendoState, target_response: str) -> tuple[bool, str, bool, str]:
+    async def _evaluate(
+        self, state: CrescendoState, target_response: str
+    ) -> tuple[bool, str, dict, bool, str, str, dict]:
         """
-        Evaluate the target's response.
+        Evaluate the target's response with two sequential judge calls.
 
         Returns:
-            (is_refusal, refusal_rationale, is_success, success_rationale)
+            (is_refusal, refusal_rationale, refusal_raw,
+             is_success, success_rationale, success_description, success_raw)
+
+            refusal_raw / success_raw are the full JSON dicts returned by the judge.
+            success_raw is {} when the refusal check short-circuits (is_refusal=True).
         """
         # Step 1: refusal check
         refusal_messages = [
@@ -212,13 +229,13 @@ class CrescendoRunner:
         ]
 
         async with self._judge_sem:
-            refusal_data = await _call_json(
+            refusal_raw = await _call_json(
                 self._judge, self.judge_model, refusal_messages, temperature=0.0
             )
 
-        refusal_rationale = refusal_data.get("rationale", "")
-        if str(refusal_data.get("score_value", "false")).strip().lower() == "true":
-            return True, refusal_rationale, False, ""
+        refusal_rationale = refusal_raw.get("rationale", "")
+        if str(refusal_raw.get("score_value", "false")).strip().lower() == "true":
+            return True, refusal_rationale, refusal_raw, False, "", "", {}
 
         # Step 2: success check
         true_description = (
@@ -242,14 +259,15 @@ class CrescendoRunner:
         ]
 
         async with self._judge_sem:
-            success_data = await _call_json(
+            success_raw = await _call_json(
                 self._judge, self.judge_model, success_messages, temperature=0.0
             )
 
-        is_success = str(success_data.get("score_value", "false")).strip().lower() == "true"
-        success_rationale = success_data.get("rationale", "")
+        is_success = str(success_raw.get("score_value", "false")).strip().lower() == "true"
+        success_rationale    = success_raw.get("rationale", "")
+        success_description  = success_raw.get("description", "")
 
-        return False, "", is_success, success_rationale
+        return False, "", refusal_raw, is_success, success_rationale, success_description, success_raw
 
     # -----------------------------------------------------------------------
     # Public API
@@ -260,8 +278,9 @@ class CrescendoRunner:
         objective: str,
         objective_pair_id: int,
         model_shortname: str,
+        goal_type: str,
+        attempt: int,
         n_turns: int = 3,
-        stop_on_success: bool = True,
     ) -> dict:
         """
         Run a single Crescendo attack conversation.
@@ -270,15 +289,16 @@ class CrescendoRunner:
             objective: The harmful behavior to elicit.
             objective_pair_id: ID linking this conversation to its JBB matched pair.
             model_shortname: Shortname of the target model (e.g. "llama3_8b").
+            goal_type: "harmful" or "benign".
+            attempt: 1-indexed repetition number for this objective.
             n_turns: Number of attack turns to run.
-            stop_on_success: If False, continue all n_turns even after a successful
-                response. Set to False for benign conversations so the full turn
-                sequence is generated regardless of judge score.
 
         Returns:
-            Conversation dict matching the schema in src/utils/io.py.
+            Conversation dict with full raw logging of all attacker, judge, and
+            target interactions. Process downstream to derive messages, rolled-back
+            turn filtering, etc.
         """
-        system_prompt = Template(CRESCENDO_VARIANT_1).render(
+        attacker_system_prompt = Template(CRESCENDO_VARIANT_1).render(
             objective=objective,
             max_turns=n_turns,
             current_turn=1,
@@ -288,16 +308,19 @@ class CrescendoRunner:
         state = CrescendoState(
             objective=objective,
             max_turns=n_turns,
-            attacker_context=[AttackerMessage(role="system", content=system_prompt)],
+            attacker_context=[AttackerMessage(role="system", content=attacker_system_prompt)],
         )
+
+        # Seed target history with system prompt
+        state.target_history = [{"role": "system", "content": BASE_TARGET_PROMPT}]
 
         turns = []
         verdict = "refusal"
         jailbreak_turn: int | None = None
 
         for turn_idx in range(1, n_turns + 1):
-            # 1. Generate question
-            question = await self._generate_question(state)
+            # 1. Generate question — returns (question, full raw attacker JSON)
+            question, attacker_raw = await self._generate_question(state)
             state.last_question = question
             # The last element of attacker_context is the user prompt just sent
             attacker_prompt = state.attacker_context[-1].content
@@ -307,40 +330,51 @@ class CrescendoRunner:
             target_response = await self._get_target_response(state)
             state.target_history.append({"role": "assistant", "content": target_response})
 
-            # 3. Evaluate
-            is_refusal, refusal_rationale, is_success, success_rationale = await self._evaluate(state, target_response)
+            # 3. Evaluate — returns full raw judge JSON dicts
+            (
+                is_refusal, refusal_rationale, refusal_raw,
+                is_success, success_rationale, success_description, success_raw,
+            ) = await self._evaluate(state, target_response)
             state.is_refusal = is_refusal
 
-            # Record turn with full judge metadata
+            # Record user turn
+            # rolled_back mirrors the corresponding assistant turn — set here since
+            # is_refusal is already known. Downstream can filter on this flag.
             turns.append({
-                "role": "user",
-                "content": question,
-                "turn_idx": turn_idx,
-                "attacker_prompt": attacker_prompt,
+                "role":                   "user",
+                "content":                question,
+                "turn_idx":               turn_idx,
+                "rolled_back":            is_refusal,
+                "attacker_prompt":        attacker_prompt,
+                # Full raw JSON from attacker LLM (includes generated_question,
+                # last_response_summary, rationale_behind_jailbreak)
+                "attacker_raw_response":  attacker_raw,
             })
+
+            # Record assistant turn
             turns.append({
-                "role": "assistant",
-                "content": target_response,
-                "turn_idx": turn_idx,
-                "is_refusal": is_refusal,
-                "judge_refusal_rationale": refusal_rationale if is_refusal else "",
-                "judge_success": is_success,
-                "judge_success_rationale": success_rationale,
-                "rolled_back": is_refusal,
+                "role":                       "assistant",
+                "content":                    target_response,
+                "turn_idx":                   turn_idx,
+                "rolled_back":                is_refusal,
+                # Refusal judge
+                "is_refusal":                 is_refusal,
+                "judge_refusal_rationale":    refusal_rationale,
+                "judge_refusal_raw":          refusal_raw,
+                # Success judge (empty/False when refusal short-circuits)
+                "judge_success":              is_success,
+                "judge_success_rationale":    success_rationale,
+                "judge_success_description":  success_description,
+                "judge_success_raw":          success_raw,
             })
 
             # Always add target response to attacker context to maintain alternating roles.
-            # Without this, a refusal leaves a dangling user message and the next turn
-            # produces consecutive user messages, which the OpenAI API rejects.
             state.attacker_context.append(
                 AttackerMessage(role="assistant", content=target_response)
             )
 
             if is_refusal:
-                # Roll back target_history so the target doesn't see the failed exchange
-                # on the next turn — keeping refusals in target context primes the model
-                # to keep refusing.  The attacker is still informed via the next turn's
-                # user prompt ("The target refused … please try a different approach").
+                # Roll back target_history so the target doesn't see the failed exchange.
                 state.target_history.pop()   # remove assistant (refusal response)
                 state.target_history.pop()   # remove user (refused question)
             else:
@@ -351,23 +385,49 @@ class CrescendoRunner:
             if is_success and jailbreak_turn is None:
                 jailbreak_turn = turn_idx
                 verdict = "jailbroken"
-                if stop_on_success:
-                    break
+                break
 
             if turn_idx == n_turns and jailbreak_turn is None:
                 verdict = "near_miss" if not is_refusal else "refusal"
 
+        # Compute final_turn_outcome from the last logged assistant response
+        last_assistant_content = next(
+            (t["content"] for t in reversed(turns) if t["role"] == "assistant"),
+            "",
+        )
+        final_turn_outcome = check_final_turn_outcome(last_assistant_content)
+
         return {
-            "conversation_id": str(uuid.uuid4()),
-            "objective_pair_id": objective_pair_id,
-            "objective": objective,
-            "attack_framework": "crescendo",
-            "attacker_model": self.attacker_model,
-            "judge_model": self.judge_model,
-            "model": model_shortname,
-            "verdict": verdict,
-            "jailbreak_turn": jailbreak_turn,
-            "n_turns": n_turns,
-            "executed_turns": state.executed_turns,
-            "turns": turns,
+            # ── Identity ─────────────────────────────────────────────────────
+            "conversation_id":      str(uuid.uuid4()),
+            "objective_pair_id":    objective_pair_id,
+            "objective":            objective,
+            "goal_type":            goal_type,
+            "attempt":              attempt,
+            "attack_framework":     "crescendo",
+            # ── Models ───────────────────────────────────────────────────────
+            "model":                model_shortname,
+            "attacker_model":       self.attacker_model,
+            "judge_model":          self.judge_model,
+            # ── System prompts (stored verbatim for full reproducibility) ────
+            "attacker_system_prompt": attacker_system_prompt,
+            "target_system_prompt":   BASE_TARGET_PROMPT,
+            # ── Target call parameters ───────────────────────────────────────
+            "target_temperature":   _TARGET_TEMPERATURE,
+            "target_max_tokens":    _TARGET_MAX_TOKENS,
+            # ── Outcome ──────────────────────────────────────────────────────
+            "verdict":              verdict,
+            "final_turn_outcome":   final_turn_outcome,
+            "jailbreak_turn":       jailbreak_turn,
+            "n_turns":              n_turns,
+            "executed_turns":       state.executed_turns,
+            # ── Timestamp ────────────────────────────────────────────────────
+            "timestamp":            datetime.now(timezone.utc).isoformat(),
+            # ── Full turn log ─────────────────────────────────────────────────
+            # Each user turn has: content, attacker_prompt, attacker_raw_response,
+            #   rolled_back.
+            # Each assistant turn has: content, rolled_back, is_refusal,
+            #   judge_refusal_raw, judge_success, judge_success_raw, etc.
+            # Rolled-back pairs are included — filter downstream as needed.
+            "turns":                turns,
         }
