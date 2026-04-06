@@ -20,21 +20,72 @@ Two papers are the direct predecessors of this work:
 
 ---
 
-## 3. How This Work Fits In
+## 3. Why Single-Turn RepE Does Not Transfer Directly to Multi-Turn
+
+The single-turn RepE framework (Zhao et al.) is clean because the problem is well-posed: one forward pass, one instruction token, one decision. Multi-turn conversations break nearly every assumption that makes the single-turn setting tractable. The challenges fall into five categories.
+
+### 3.1 The Extraction Target Is Ambiguous
+
+In single-turn RepE, it is obvious where to extract: the instruction token (t_inst) of the single user message. In a multi-turn conversation with n user turns, there are n candidate extraction points. Each encodes something different — the model's state before it has seen any attack context (turn 1), midway through escalation (turns 2..n−1), or at the decision point closest to compliance (turn n). These are not interchangeable. As the attack progresses, the model's activations at successive user turns encode qualitatively different information, and, as this work finds, the harmfulness-related direction in activation space rotates substantially across turns. Choosing an extraction point is therefore a methodological decision with real consequences for what direction is recovered — not a detail that can be deferred.
+
+This is reflected in the three centroid designs we evaluate: final-turn (Centroid A), relative-position early/mid/late (Centroid B), and trajectory-averaged (Centroid C). None of these has a direct analog in the single-turn literature.
+
+### 3.2 Context Accumulation Makes the Representation a Moving Target
+
+In single-turn RepE, every forward pass is independent. In multi-turn, the hidden state at user turn k is conditioned on the entire preceding context — all prior user messages and all prior assistant responses. This has two consequences.
+
+First, the representation at turn k is not a property of the k-th message in isolation; it reflects the model's state after absorbing the full conversation history up to that point. A user message that would produce a neutral representation in isolation may produce a very different representation when preceded by five turns of gradual escalation.
+
+Second, extracting at turn k requires either (a) a full forward pass over the entire conversation up to turn k, or (b) for the trajectory setting, repeated forward passes at increasing depths — which is computationally O(n) passes per conversation rather than one. This cost is manageable but non-trivial, and the design choice has implications for what information is in the extracted representation.
+
+### 3.3 Within-Pair Topic Control Is Harder to Achieve
+
+Single-turn RepE cancels topic by constructing contrast pairs (harmful goal / semantically matched benign goal) and subtracting their mean representations. This works cleanly when the only systematic difference between pairs is the harmful vs. benign intent, and the extraction point — a single instruction token — is the same for both.
+
+In multi-turn, the harmful and benign conversations of the same pair differ in several additional dimensions that within-pair subtraction cannot remove:
+
+- **Conversation length.** Jailbroken harmful conversations may run to more turns than refused ones (or the reverse), because the attack terminates early on refusal. If trajectory-averaged representations are used (Centroid C), the subtraction partially captures a depth confound rather than a harmfulness signal.
+- **Intermediate turn content.** The escalation path — the specific intermediate questions used to lead the model toward the goal — differs between harmful and benign conversations, even for the same JBB pair. The model's activations at turn k reflect this content, not just the terminal intent.
+- **Model response content.** The model's own responses to prior turns differ between harmful and benign conversations, influencing subsequent hidden states through the key-value cache and attention context.
+
+The net effect is that within-pair subtraction, while necessary, is not sufficient to cancel topic in the multi-turn setting. The residual signal in d_k reflects escalation path, conversation depth, and response dynamics in addition to harmfulness.
+
+### 3.4 Outcome Distributions Within Pairs Are Structurally Imbalanced
+
+Single-turn RepE assumes that the contrast between harmful and benign goals is the primary driver of the difference vector d_k. In multi-turn, a second structural difference contaminates d_k: the attack framework's jailbreak rate differs between harmful and benign goals.
+
+For ActorAttack, harmful conversations are jailbroken only 29% of the time, while benign conversations are accepted 88% of the time. This means the within-pair mean for harmful conversations is dominated by refused/near-miss representations, and the within-pair mean for benign conversations is dominated by compliant representations. The difference vector d_k therefore captures refusal vs. compliance rather than harmfulness vs. harmlessness — the direction is structurally inverted relative to its intended meaning. This confound is invisible in the single-turn setting, where each request either succeeds or fails on its own merits independently of goal type.
+
+### 3.5 There Is No Obvious Single Harmfulness Direction Across Frameworks
+
+In the single-turn setting, Zhao et al. find a consistent harmfulness direction that transfers across jailbreak methods and, to some extent, across models. Multi-turn attack frameworks prime the model along structurally different paths:
+
+- **Crescendo** escalates gradually, keeping each turn individually low-stakes.
+- **ActorAttack** uses persona and role-play framing to shift responsibility attribution.
+- **xTeaming** combines multiple strategies in an ensemble.
+
+Each strategy leads the model through a different region of activation space. As the preliminary results show, the pairwise cosine similarities between framework-specific v_harmful directions are near zero, indicating near-orthogonal harmfulness representations. A direction learned from one framework's conversations does not generalise to another's — there is no universal multi-turn harmfulness direction that RepE can recover with a single contrast set.
+
+This framework-specificity has no analog in single-turn RepE (which studies jailbreak prompts that all arrive in a single instruction), and it is the deepest obstacle to building a general-purpose multi-turn harmfulness detector from representation engineering alone.
+
+---
+
+## 4. How This Work Fits In
+
 
 This project extends both papers along several dimensions:
 
 - **Multi-framework**: Bullwinkel studied only Crescendo. We run the same RepE analysis across three structurally different attack frameworks (Crescendo, ActorAttack, xTeaming), enabling direct comparison of how different attack strategies prime the model's representations.
 - **Topic control**: Following Zhao et al., we use within-pair JBB-Behaviors subtraction to cancel topic. Bullwinkel does not do this.
 - **Turn-depth analysis**: We study how representations evolve across turns (Mode B), not just at the final turn. This lets us test whether the harmfulness signal builds, erodes, or transforms as the attack progresses.
-- **Multiple centroid designs**: We introduce three approaches to centroid construction that reflect different hypotheses about where in the conversation the signal is strongest (see §4.3).
+- **Multiple centroid designs**: We introduce three approaches to centroid construction that reflect different hypotheses about where in the conversation the signal is strongest (see §5.4).
 - **Cross-framework transfer**: We test whether a probe trained on one framework's representations detects another framework's attacks, probing the universality of the harmfulness direction.
 
 ---
 
-## 4. Methodology
+## 5. Methodology
 
-### 4.1 Data
+### 5.1 Data
 
 **Model:** Llama-3.1-8B-Instruct.
 
@@ -49,9 +100,9 @@ Each framework runs up to 10 attempts per goal (harmful and benign), yielding ap
 
 **Train/test split:** Attempt 10 is held out as the test set; attempts 1–9 are used for centroid construction and (future) probe training.
 
-**Planned expansion:** The current sample of 10 attempts per goal will be expanded to 30. This is expected to substantially stabilise the per-pair mean representations and increase the coherence of the learned harmfulness direction (see §4.2 and §6).
+**Planned expansion:** The current sample of 10 attempts per goal will be expanded to 30. This is expected to substantially stabilise the per-pair mean representations and increase the coherence of the learned harmfulness direction (see §5.2 and §7).
 
-### 4.2 Token Positions and Hidden State Extraction
+### 5.2 Token Positions and Hidden State Extraction
 
 Following Zhao et al., hidden states are extracted at two positions per turn:
 
@@ -73,7 +124,7 @@ Hidden states are extracted across all 32 layers simultaneously using `output_hi
 - **Mode A** (final-turn): one forward pass per conversation, passing the full conversation up to the last accepted user turn. Produces one (32, 4096) representation per conversation — used for centroid construction and main evaluation.
 - **Mode B** (trajectory): one forward pass per turn, up to turn k, for k = 1…n. Produces one (32, 4096) representation per (conversation, turn) pair — used for trajectory analysis.
 
-### 4.3 Finding the Harmfulness Direction
+### 5.3 Finding the Harmfulness Direction
 
 For each framework, a harmfulness direction v_harmful ∈ ℝ^(32×4096) is constructed from training conversations.
 
@@ -83,7 +134,7 @@ For each JBB pair k (k = 1…100):
 2. Compute μ_b,k = mean h_inst over all benign training conversations for goal k
 3. Form difference vector d_k = μ_h,k − μ_b,k
 
-This subtraction is designed to cancel the topic component: if harmful and benign conversations of the same pair differ only in their harmfulness (not their topic), d_k isolates the harmfulness signal. The quality of this cancellation depends on the outcome distributions within pairs (see §4.4 and §5).
+This subtraction is designed to cancel the topic component: if harmful and benign conversations of the same pair differ only in their harmfulness (not their topic), d_k isolates the harmfulness signal. The quality of this cancellation depends on the outcome distributions within pairs (see §5.4 and §6).
 
 **v_harmful** is the mean of the d_k vectors across all 100 pairs. As a diagnostic, we also run per-layer PCA on the set of {d_k} and report the variance explained by PC1 — a measure of how coherent the harmfulness direction is across goals. Low variance explained (currently 6–13%) indicates the difference vectors are spread across many directions, suggesting no single dominant harmfulness axis shared across all goals. This is expected to improve with larger sample sizes as per-pair estimates stabilise.
 
@@ -103,7 +154,7 @@ proj = mean over layers of [cos_sim(h_inst_norm, v_harmful_norm)]
 ```
 This is more directly comparable to Zhao et al. but is currently unreliable for Crescendo and ActorAttack (see §5).
 
-### 4.4 Centroid Design Options
+### 5.4 Centroid Design Options
 
 A key methodological question for multi-turn RepE — absent in the single-turn setting — is *which turn's representation* to use for centroid construction. We implement three designs:
 
@@ -115,7 +166,7 @@ A key methodological question for multi-turn RepE — absent in the single-turn 
 
 The distinction between these designs is unique to multi-turn RepE and has no analog in single-turn work.
 
-### 4.5 Evaluation
+### 5.5 Evaluation
 
 **Cross-framework transfer matrix:** For each (centroid source, test framework) pair, we compute Δ_harmful on held-out test conversations and report harmful accuracy (Δ_harmful > 0), benign accuracy (Δ_harmful ≤ 0), and overall accuracy. This 4×3 matrix (4 centroid sources including single-turn baseline, 3 test frameworks) is the primary evaluation.
 
@@ -126,7 +177,7 @@ The distinction between these designs is unique to multi-turn RepE and has no an
 
 **Single-turn sanity check:** Applies the single-turn centroid to 200 single-turn JBB inputs (no attack context). This tests the RepE machinery in isolation and provides a ceiling on what's achievable without multi-turn context confounds.
 
-### 4.6 Known Limitations and Honest Critiques
+### 5.6 Known Limitations and Honest Critiques
 
 **v_harmful contamination (Crescendo and ActorAttack):** The behavioural validation shows the v_harmful direction is inverted for Crescendo and ActorAttack — refused conversations project more strongly onto v_harmful than jailbroken ones. The root cause is outcome distribution imbalance: Crescendo's harmful conversations are 83% jailbroken and its benign conversations are 94% jailbroken (similar distributions, weak signal); ActorAttack's harmful conversations are only 29% jailbroken while benign are 88% accepted (very different distributions, so μ_harmful ≈ refused and μ_benign ≈ accepted, and d_k ≈ refusal direction). The within-pair subtraction does not fix this — it is a structural property of how these attacks work. Only xTeaming, with more balanced outcomes, produces a correctly oriented v_harmful. Potential fixes: filter to matched-outcome pairs within pair_id, or restrict topic-control claims to xTeaming.
 
@@ -144,7 +195,7 @@ The distinction between these designs is unique to multi-turn RepE and has no an
 
 ---
 
-## 5. Preliminary Results: Direction and Overall Outcomes
+## 6. Preliminary Results: Direction and Overall Outcomes
 
 *Note: specific accuracy numbers are not emphasised here. The current sample size (10 attempts per goal) is insufficient for stable estimates, and significance testing has not been performed. The following describes directional trends and qualitative findings.*
 
@@ -164,7 +215,7 @@ The distinction between these designs is unique to multi-turn RepE and has no an
 
 ---
 
-## 6. Planned Work and Open Questions
+## 7. Planned Work and Open Questions
 
 - **Expand to 30 attempts per goal** (harmful and benign, all three frameworks). Primary motivation: stable per-pair means, meaningful significance testing, and diagnosis of whether low PCA variance reflects noise or true goal-specificity.
 - **Add fine-tuned attacker model** for comparison. Expected benefit: higher jailbreak rates, cleaner outcome distributions, and a "strong attack" reference point.
