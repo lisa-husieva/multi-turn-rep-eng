@@ -16,7 +16,7 @@ with no system prompt.
 
 | Role | Default model | API |
 |---|---|---|
-| Attacker / planner | `gpt-4o-mini` | OpenAI |
+| Attacker / planner | `gpt-4o` | OpenAI |
 | Judge | `gpt-4o` | OpenAI |
 | Target | configurable (e.g. `meta-llama/Llama-3.1-8B-Instruct`) | Local vLLM |
 
