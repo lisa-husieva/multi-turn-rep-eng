@@ -321,7 +321,9 @@ class XTeamingRunner:
             return [], 0, 0, "", None, False, None
 
         strategy_str    = _format_strategy(strategy)
-        target_history:  list[dict] = [{"role": "system", "content": BASE_TARGET_PROMPT}]
+        target_history:  list[dict] = (
+            [{"role": "system", "content": BASE_TARGET_PROMPT}] if BASE_TARGET_PROMPT else []
+        )
         turns_out:       list[dict] = []
         conv_history_str: str = ""
         best_score: int = 0

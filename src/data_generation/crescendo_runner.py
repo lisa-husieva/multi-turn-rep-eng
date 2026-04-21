@@ -319,7 +319,11 @@ class CrescendoRunner:
         )
 
         # Seed target history with system prompt
-        state.target_history = [{"role": "system", "content": BASE_TARGET_PROMPT}]
+        # Skip system role entirely when BASE_TARGET_PROMPT is empty — needed for
+        # chat templates that don't support a system role (e.g. Gemma).
+        state.target_history = (
+            [{"role": "system", "content": BASE_TARGET_PROMPT}] if BASE_TARGET_PROMPT else []
+        )
 
         turns = []
         verdict = "refusal"

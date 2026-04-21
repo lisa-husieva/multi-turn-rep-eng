@@ -416,7 +416,9 @@ class ActorAttackRunner:
         if not queries:
             return [], 0, 0, "", {}
 
-        target_history: list[dict] = [{"role": "system", "content": BASE_TARGET_PROMPT}]
+        target_history: list[dict] = (
+            [{"role": "system", "content": BASE_TARGET_PROMPT}] if BASE_TARGET_PROMPT else []
+        )
         turns_out: list[dict] = []
         executed: int = 0
 
