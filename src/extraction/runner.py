@@ -160,8 +160,14 @@ def extract_at_positions(model, tokenizer, messages, layer_indices,
 
 # ─── Save + resume helpers ────────────────────────────────────────────────────
 
-def save_arrays(save_dir, h_inst_list, h_post_list, meta_list):
-    """Concatenate and save arrays + metadata parquet."""
+def save_arrays(save_dir, h_inst_list, h_post_list, meta_list,
+                layer_indices=None, n_transformer_layers_total=None):
+    """Concatenate and save arrays + metadata parquet.
+
+    If `layer_indices` (1-indexed transformer-block IDs saved) and
+    `n_transformer_layers_total` are given, also writes `layer_indices.json`
+    so the shared analysis notebooks can read the per-model sweep.
+    """
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
     h_inst = np.concatenate(h_inst_list, axis=0).astype(np.float16)
@@ -170,6 +176,17 @@ def save_arrays(save_dir, h_inst_list, h_post_list, meta_list):
     np.save(str(save_dir / "h_inst.npy"), h_inst)
     np.save(str(save_dir / "h_post_inst.npy"), h_post)
     meta.to_parquet(save_dir / "metadata.parquet", index=False)
+
+    if layer_indices is not None and n_transformer_layers_total is not None:
+        mapping = {
+            "n_transformer_layers_original": int(n_transformer_layers_total),
+            "n_sweep": len(layer_indices),
+            "saved_positions_0_indexed": list(range(len(layer_indices))),
+            "transformer_layers_1_indexed": [int(l) for l in layer_indices],
+            "labels": [f"L{int(l)}" for l in layer_indices],
+        }
+        (save_dir / "layer_indices.json").write_text(json.dumps(mapping, indent=2))
+
     print(f"  Saved → {save_dir}")
     print(f"  h_inst:      {h_inst.shape}  ({h_inst.nbytes / 1e9:.2f} GB)")
     print(f"  h_post_inst: {h_post.shape}  ({h_post.nbytes / 1e9:.2f} GB)")
@@ -258,6 +275,7 @@ def run_condition(
     resume_key_cols,
     desc,
     user_end_token="<|eot_id|>",
+    n_transformer_layers_total=None,
 ):
     """
     Multi-GPU parallel extraction over conversation files for one condition.
@@ -356,7 +374,9 @@ def run_condition(
         t.join()
     pbar.close()
 
-    save_arrays(save_dir, all_h_inst, all_h_post, all_meta)
+    save_arrays(save_dir, all_h_inst, all_h_post, all_meta,
+                layer_indices=layer_indices,
+                n_transformer_layers_total=n_transformer_layers_total)
 
 
 def run_single_turn_baseline(
@@ -370,6 +390,7 @@ def run_single_turn_baseline(
     layer_indices,
     dtype,
     user_end_token="<|eot_id|>",
+    n_transformer_layers_total=None,
 ):
     """Extract hidden states for raw JBB goals (Condition 4). Single-GPU, fast."""
     save_dir = Path(save_dir)
@@ -387,10 +408,10 @@ def run_single_turn_baseline(
     for _, row in tqdm(goals_df.iterrows(), total=len(goals_df),
                        desc=f"single_turn_{goal_type}",
                        file=sys.stdout):
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": row["Goal"]},
-        ]
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": row["Goal"]})
         h_inst, h_post, t_inst, t_post, seq_len = extract_at_positions(
             mdl, tok, messages, layer_indices, dtype, user_end_token
         )
@@ -411,4 +432,6 @@ def run_single_turn_baseline(
         [np.stack(h_inst_list)],
         [np.stack(h_post_list)],
         [pd.DataFrame(meta_list)],
+        layer_indices=layer_indices,
+        n_transformer_layers_total=n_transformer_layers_total,
     )
