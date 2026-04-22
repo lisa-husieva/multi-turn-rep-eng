@@ -132,6 +132,14 @@ If a question does not make any sense, or is not factually coherent, explain why
 INLINE_SYSTEM_IN_USER = False
 
 
+# Repetition penalty forwarded to vLLM via `extra_body` on every target
+# chat.completions.create call. 1.0 = disabled (default). Use a small value
+# like 1.05 for target models with documented greedy-decoding degeneration
+# bugs (e.g. Phi-3.5-mini-instruct, where T=0 can lock into repetition
+# loops). Set this from model-specific nb01 before generation starts.
+TARGET_REPETITION_PENALTY = 1.0
+
+
 def prepare_target_messages(history: list[dict]) -> list[dict]:
     """Transform a target message list for models that don't support a system role.
 

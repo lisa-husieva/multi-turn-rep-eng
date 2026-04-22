@@ -391,13 +391,17 @@ class ActorAttackRunner:
             )
 
     async def _get_target_response(self, history: list[dict]) -> str:
-        from src.data_generation.prompts import prepare_target_messages
+        from src.data_generation import prompts
+        extra = {}
+        if prompts.TARGET_REPETITION_PENALTY != 1.0:
+            extra["extra_body"] = {"repetition_penalty": prompts.TARGET_REPETITION_PENALTY}
         async with self._target_sem:
             resp = await self._target.chat.completions.create(
                 model=self.target_model_id,
-                messages=prepare_target_messages(history),
+                messages=prompts.prepare_target_messages(history),
                 temperature=_TARGET_TEMPERATURE,
                 max_tokens=_TARGET_MAX_TOKENS,
+                **extra,
             )
         return resp.choices[0].message.content or ""
 
