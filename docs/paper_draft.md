@@ -52,7 +52,7 @@ Three attack frameworks generate multi-turn conversations against the model: Cre
 
 Target model is Llama-3.1-8B-Instruct with a standard helpful assistant system prompt. GPT-4o is the attacker and judge for all three frameworks.
 
-Planning to also include Qwen2.5-7B-Instruct and Mistral-7B-Instruct-v0.3. These are similarly-sized models with different architectures and safety training.
+We also include Qwen2.5-7B-Instruct and Phi-3.5-mini-instruct as additional target models. These span different architectures, training data, and safety alignment strategies. Phi-3.5-mini is notably smaller (3.8B) than Llama and Qwen (~7–8B), which lets us check whether the displacement phenomenon is robust to target-model scale.
 
 ### 3.3 Token positions
 
@@ -110,7 +110,7 @@ This pattern is framework-dependent. Crescendo, which builds harmful intent grad
 
 Many:
 
-- **Only one model.** Models with different attention mechanisms (e.g., sliding window attention in Mistral, full attention in Gemma 2) and different safety alignment strategies may show different displacement patterns.
+- **Three models, all dense-attention decoder-only transformers.** Models with different attention mechanisms (e.g., sliding-window or sparse attention) and different safety alignment strategies may show different displacement patterns than the ones we measure here.
 - **Only one dataset.** The 10 harm categories included probably do not represent the full range of harmful requests that multi-turn attacks target in practice. Although to be fair, the 10 harm categories and individual behaviors included are quite diverse and validated, and the topic-matched structure is important. What needs to be done is leave training and direction computation on JBB only, and test on an external dataset of harmful/benign goals outside of JBB. Good candidates would be AdvBench, HarmBench, and OR-Bench.
 - **Harmful vs. benign confounds beyond topic.** Harmful and benign conversations may differ in ways other than topic (attacker vocabulary patterns, model response styles, and turn-level dynamics may all differ between harmful and benign conditions in ways that the direction captures alongside harmfulness). We have not verified the magnitude of this confound, though the fact that no-context directions (where conversation dynamics are absent) achieve similar AUROC to full-context directions with their own `v_own` suggests that at least some of the captured signal is content-based rather than purely structural. Honestly, at least trying to estimate the magnitude of those confounders would be valuable on its own — no prior work I've seen talks or cares much about that.
 - **Train/test split by attempt, not by goal.** For now, the 80:20 train:test split divides by attempt number (1–16 for training, 17–20 for evaluation) rather than by goal. This means the same harmful and benign goals appear in both splits. Again, training should stay on JBB but testing should use a totally different dataset of goals. Might need to include how similar the test dataset goals are to JBB ones.

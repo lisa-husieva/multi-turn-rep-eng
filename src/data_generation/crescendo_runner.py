@@ -194,10 +194,11 @@ class CrescendoRunner:
 
     async def _get_target_response(self, state: CrescendoState) -> str:
         """Send current target_history to the target model and return its reply."""
+        from src.data_generation.prompts import prepare_target_messages
         async with self._target_sem:
             response = await self._target.chat.completions.create(
                 model=self.target_model_id,
-                messages=state.target_history,
+                messages=prepare_target_messages(state.target_history),
                 temperature=_TARGET_TEMPERATURE,
                 max_tokens=_TARGET_MAX_TOKENS,
             )

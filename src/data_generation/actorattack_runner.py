@@ -391,10 +391,11 @@ class ActorAttackRunner:
             )
 
     async def _get_target_response(self, history: list[dict]) -> str:
+        from src.data_generation.prompts import prepare_target_messages
         async with self._target_sem:
             resp = await self._target.chat.completions.create(
                 model=self.target_model_id,
-                messages=history,
+                messages=prepare_target_messages(history),
                 temperature=_TARGET_TEMPERATURE,
                 max_tokens=_TARGET_MAX_TOKENS,
             )
