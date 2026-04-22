@@ -317,9 +317,12 @@ def run_condition(
         device = f"cuda:{gpu_id}"
         print(f"GPU {gpu_id}: loading {model_id} ...", flush=True)
         tok = AutoTokenizer.from_pretrained(model_id)
-        mdl = AutoModelForCausalLM.from_pretrained(
-            model_id, torch_dtype=dtype, device_map={"": device}
-        )
+        # Load on CPU first, then move explicitly. `device_map={"": device}` routes
+        # through accelerate's meta-tensor fastpath, which breaks on models with
+        # tied embeddings (Gemma-2): `lm_head.weight` stays on `meta` and the
+        # dispatch raises "Cannot copy out of meta tensor".
+        mdl = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=dtype)
+        mdl = mdl.to(device)
         mdl.eval()
         print(f"GPU {gpu_id}: ready, {len(chunk)} files", flush=True)
 
@@ -399,9 +402,10 @@ def run_single_turn_baseline(
     device = f"cuda:{logical_gpu_ids[0]}"
     print(f"Loading {model_id} on {device} ...", flush=True)
     tok = AutoTokenizer.from_pretrained(model_id)
-    mdl = AutoModelForCausalLM.from_pretrained(
-        model_id, torch_dtype=dtype, device_map={"": device}
-    )
+    # See matching comment in run_condition — avoid the meta-tensor fastpath
+    # to keep tied-weight models (e.g. Gemma-2) loading cleanly.
+    mdl = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=dtype)
+    mdl = mdl.to(device)
     mdl.eval()
 
     h_inst_list, h_post_list, meta_list = [], [], []
