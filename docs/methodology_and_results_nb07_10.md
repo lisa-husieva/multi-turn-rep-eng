@@ -2,6 +2,8 @@
 
 ## Notebooks 07–10: Methodology and Results
 
+> **Note.** This is a retrospective document; notebook numbers here (07, 08, 09, 10) refer to the pre-reorganization numbering. Current mapping: nb07 (k-turn extraction) is now folded into per-model `03_extract_hidden_states.ipynb`; nb08 displacement → `04_displacement_analysis.ipynb`; nb09 token-position → `05_token_position_verification.ipynb`; nb10 nonlinear probing → `06_nonlinear_probing.ipynb`. See `experiment_plan.md` for the current structure.
+
 ---
 
 ## 1. Motivation

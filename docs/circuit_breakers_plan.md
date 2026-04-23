@@ -45,7 +45,7 @@ If all four hold, the framing for the paper is: *"displacement geometrically exp
 - Base control: `notebooks/llama_3_8B_instruct/` (new, parallel)
 - Data layout: `data/llama_3_RR/` and `data/llama_3_base/`
 - System prompt: the same "helpful, respectful, honest" prompt as Llama-3.1 runs (Llama-3 supports system role natively)
-- Everything downstream (nb02 / nb08 / nb09 / nb10 / nb12 / nb13) runs unchanged after flipping `MODEL` at the top
+- Everything downstream (nb01 / nb02 / nb03 / nb04 / nb05 / nb06) runs unchanged after flipping `MODEL` at the top
 
 ### 4.2 Direction computation on the CB model
 For each condition (full-context, no-context, compressed, single-turn):
@@ -75,7 +75,7 @@ For each intervened layer `l`:
 
 **H-CB1 prediction:** this cosine decays monotonically with k, paralleling the base model's own `cos(v_full(k), v_ST)` displacement curve.
 
-For the residual-displacement analysis on the CB model (**H-CB2**), rerun nb08/nb12's displacement figures with `MODEL = "llama_3_RR"`. Expected pattern: the CB model has its own displacement curve that looks qualitatively similar to the base model's, even though its v_ST has shifted.
+For the residual-displacement analysis on the CB model (**H-CB2**), rerun nb04's displacement figures (and nb03's probe-quality checks) with `MODEL = "llama_3_RR"`. Expected pattern: the CB model has its own displacement curve that looks qualitatively similar to the base model's, even though its v_ST has shifted.
 
 For **H-CB3**, correlate per-attempt jailbreak outcome (binary SR-jailbroken label) with per-attempt displacement magnitude (average `||h_k − h_1||` or similar proxy). Positive correlation → attempts that displace more are more likely to succeed.
 
@@ -87,16 +87,16 @@ All new notebooks live at `notebooks/` (analysis is shared across models) or as 
 
 | Notebook | Purpose |
 |---|---|
-| `14_circuit_breakers_analysis.ipynb` | All CB-specific analyses: rerouting direction (A+B), cosine-with-v_harmful table, H-CB1/H-CB2/H-CB3/H-CB4 figures |
+| `09_circuit_breakers_analysis.ipynb` | All CB-specific analyses: rerouting direction (A+B), cosine-with-v_harmful table, H-CB1/H-CB2/H-CB3/H-CB4 figures |
 | `notebooks/llama_3_8B_RR_instruct/*.ipynb` | Data generation + extraction for CB model (same 2-notebook template as Gemma/Qwen) |
 | `notebooks/llama_3_8B_instruct/*.ipynb` | Control, same template |
 
-Existing shared notebooks (08, 09, 10, 12, 13) extend transparently when their `MODEL` constant is set to `llama_3_RR` or `llama_3_base`.
+Existing shared notebooks (01–06) extend transparently when their `MODEL` constant is set to `llama_3_RR` or `llama_3_base`.
 
 ## 6. Figures for the paper
 
 - **Fig CB-1 — Rerouting direction vs base model's v_harmful(k).** Per intervened layer, line plot of `cos(v_rr, v_harmful_base(k))` across k. One panel per framework. Prediction: descending line.
-- **Fig CB-2 — CB model's own displacement.** Replicate nb08 Fig 1 with `MODEL=llama_3_RR`. Two lines per framework (`cos(v_full(k), v_ST)` and `cos(v_full(k), v_nc(k))`). Prediction: same shape as base Llama-3.
+- **Fig CB-2 — CB model's own displacement.** Replicate nb04 Fig 1 with `MODEL=llama_3_RR`. Two lines per framework (`cos(v_full(k), v_ST)` and `cos(v_full(k), v_nc(k))`). Prediction: same shape as base Llama-3.
 - **Fig CB-3 — Single-turn vs multi-turn ASR drop.** Bar chart: base ASR vs CB ASR for (single-turn JBB, Crescendo, ActorAttack, X-Teaming). Prediction: large gap only in single-turn column.
 - **Fig CB-4 — Per-attempt displacement × jailbreak success.** Scatter or binned curve of displacement magnitude vs jailbreak probability, on CB model. Prediction: monotonic positive.
 
@@ -130,7 +130,7 @@ Approximately **one focused week** of researcher time plus GPU time for the rege
 | Generate conversations on both models (3 frameworks × 2 splits each, vLLM runs) | 1.0 |
 | Extract hidden states under all 4 conditions, both models | 1.0 |
 | Compute rerouting direction (Options A and B, all intervened layers) | 0.5 |
-| Run `14_circuit_breakers_analysis.ipynb` — all 4 hypotheses | 1.0 |
+| Run `09_circuit_breakers_analysis.ipynb` — all 4 hypotheses | 1.0 |
 | Write up the CB section + produce paper figures | 1.5 |
 | Slack for debugging template issues, sanity checks, figure polish | 0.5 |
 
