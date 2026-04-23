@@ -2,7 +2,7 @@
 
 Planning document for the research paper extending `paper_draft.md`. Defines the spine of the paper, refined research questions, experiment bundles, probe-quality certifications, external-generalization protocol, sample-size governance, and the circuit-breakers mechanism study.
 
-Companion docs: `paper_draft.md`, `methods.md`, `experiment_design.md`, `circuit_breakers_plan.md`, `results_figures.md`.
+Companion docs: `paper_draft.md`, `methods.md`, `experiment_design.md`, `circuit_breakers_plan.md`.
 
 ---
 
